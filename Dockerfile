@@ -9,15 +9,15 @@ RUN mv ffmpeg-build/artifacts/ffmpeg-*-linux-gnu/bin/ffmpeg .
 
 FROM python:3.11-slim
 
-ENV WINEPREFIX="/wine32" 
-ENV WINEARCH=win32 
+ENV WINEPREFIX="/wine32"
+ENV WINEARCH=win32
 ENV LOG_LEVEL=
 RUN dpkg --add-architecture i386
-RUN apt-get update && apt-get install -y wine32 wine:i386 --no-install-recommends
+RUN apt-get update && apt-get install -y wine32 wine:i386 winbind --no-install-recommends
 RUN apt-get clean
-RUN /usr/bin/wine wineboot | true
+RUN /usr/bin/wine wineboot -i | true
 COPY --from=builder /root/ffmpeg /usr/bin/ffmpeg
-COPY psp_at3tool.exe .
+COPY psp_at3tool.exe /root/psp_at3tool.exe
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 RUN mkdir /uploads

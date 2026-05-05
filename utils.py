@@ -48,7 +48,9 @@ def do_encode(input, type, logger):
   output = Path(gettempdir(), str(uuid4())).absolute()
   result = subprocess.run(['/usr/bin/wine', '/root/psp_at3tool.exe', '-e', '-br', str(bitrates[type]),
     input,
-    output])
+    output], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+  if result.stdout:
+    logger.info(result.stdout.decode('utf-8', errors='ignore'))
   if result.returncode != 0:
     raise RuntimeError(f"Encoding failed with code {result.returncode}")
   if not Path(output).exists():
