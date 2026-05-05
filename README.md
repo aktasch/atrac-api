@@ -1,10 +1,29 @@
 # ATRAC Encode/Decode Server
 
-This is a basic [FastAPI](https://fastapi.tiangolo.com/) python application for running a windows executable atrac encoder as an API-driven service. It was originally designed for integration with [Web MiniDisc Pro](https://github.com/asivery/webminidisc).
+A [FastAPI](https://fastapi.tiangolo.com/) service that wraps [atracdenc](https://github.com/dcherednik/atracdenc) for encoding/decoding ATRAC audio. Designed for integration with [Web MiniDisc Pro](https://github.com/asivery/webminidisc).
 
-## Installation
+This fork uses `atracdenc` (native Linux) instead of the original `psp_at3tool.exe` Windows binary under Wine, because Wine's `sock_check_pollhup` fails on Linux kernel 6.x.
 
-No executables are provided in this repository. The current syntax of the script is designed to work with the ATRAC3 tool included with the Sony PSP SDK. Other executables such as [atracdenc](https://github.com/dcherednik/atracdenc) can be easily substituted
+## Supported formats
 
-To build atracapi as a docker container, provide an encoder executable in the root of this repository with the name `psp_at3tool.exe` and run `docker build .` 
+- **LP2** (ATRAC3, 132 kbps)
+- **LP4** (ATRAC3, 66 kbps)
 
+ATRAC3+ (`PLUS*`) and `LP105` are not supported by atracdenc.
+
+## Build & run
+
+```bash
+docker build -t mdencoder:latest .
+docker compose up -d
+```
+
+The build pulls and compiles atracdenc and ffmpeg from source, so first build takes ~10-15 min.
+
+## Endpoints
+
+- `POST /encode?type=LP2` — WAV → AEA (ATRAC3)
+- `POST /transcode?type=LP2[&loudnessTarget=-20|&applyReplaygain=true]` — any audio → AEA (FFmpeg-preprocessed)
+- `POST /decode` — AEA → WAV
+
+API docs available at `/docs`.

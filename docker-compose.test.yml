@@ -1,0 +1,11 @@
+version: '3.8'
+
+services:
+  atrac-api:
+    image: mdencoder:latest
+    container_name: atrac-api-test
+    ports:
+      - "5050:5000"
+    environment:
+      - LOG_LEVEL=
+    restart: "no"

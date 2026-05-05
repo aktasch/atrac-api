@@ -2,130 +2,46 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Project Overview
+## Project overview
 
-ATRAC API is a FastAPI-based microservice that provides audio encoding/decoding and transcoding capabilities for ATRAC audio formats. It wraps the Sony PSP SDK's `psp_at3tool.exe` encoder and uses FFmpeg for transcoding operations. The service is designed primarily for integration with [Web MiniDisc Pro](https://github.com/asivery/webminidisc).
+FastAPI microservice that encodes/decodes ATRAC audio for [Web MiniDisc Pro](https://github.com/asivery/webminidisc). Originally wrapped Sony's `psp_at3tool.exe` under Wine; this fork switched to native [atracdenc](https://github.com/dcherednik/atracdenc) because Wine's `sock_check_pollhup` fails on host kernel 6.x.
+
+Trade-off of the switch: only **LP2** and **LP4** are supported. ATRAC3+ (`PLUS*`) and `LP105` are gone — atracdenc doesn't implement them.
 
 ## Architecture
 
-The application consists of two main Python modules:
+- **main.py** — FastAPI app with three endpoints (`/encode`, `/transcode`, `/decode`). Uploads land in `NamedTemporaryFile`, get `.flush()`'d before subprocess calls (the original code had a race where the file was deleted before the encoder read it). Cleanup runs in `BackgroundTasks` after the response.
+- **utils.py** — `do_encode` and `do_decode` shell out to `/usr/bin/atracdenc`. Both copy the input to a temp file with the correct extension (`.wav` for input, `.aea` for ATRAC3 output) because atracdenc dispatches on extension. Both use `stdin=DEVNULL` and `timeout=300` so a hung encoder can't block the request.
+- **Dockerfile** — three stages: build ffmpeg from source (custom filter set: `loudnorm`, `replaygain`, `volume`, `aresample`), build atracdenc from source, then a slim runtime stage that copies both binaries.
 
-- **main.py**: FastAPI server with three endpoints
-  - `/encode` - Encodes WAV to AT3 with specified ATRAC type
-  - `/transcode` - Pre-processes audio with FFmpeg (resampling, loudness normalization, replay gain) then encodes to AT3
-  - `/decode` - Decodes AT3 back to WAV
-  - All endpoints use background tasks for cleanup of temporary files
-
-- **utils.py**: Shared utilities
-  - `atracTypes` enum: Supported ATRAC formats (LP2, LP4, LP105, PLUS48-PLUS352)
-  - `bitrates` dict: Bitrate mappings for each ATRAC type
-  - `do_encode()`: Wrapper for Wine + psp_at3tool.exe encoder process
-  - `remove_file()`: Cleanup helper for temporary files
-
-## Key Technologies
-
-- **FastAPI** (0.90.0): Web framework
-- **FFmpeg**: Pre-processing (compiled with custom filters: pcm_s16le, wav, loudnorm, aresample, replaygain, volume)
-- **Wine**: Runs the Windows-only psp_at3tool.exe encoder
-- **Python 3.11**: Runtime
-
-## Building & Running
-
-### Docker (Recommended)
-
-The app is designed to run in Docker. To build:
-
-1. Obtain `psp_at3tool.exe` from the Sony PSP SDK or similar source
-2. Place it in the repo root as `psp_at3tool.exe`
-3. `docker build -t mdencoder .`
-4. Use `docker-compose.yml`: `docker-compose up -d`
-
-The Dockerfile is a multi-stage build:
-- **Builder stage**: Compiles FFmpeg from source with custom encoder/filter flags
-- **Runtime stage**: Sets up Wine for Windows executable, installs Python dependencies, copies compiled FFmpeg and psp_at3tool.exe
-
-### Local Development
+## Build & run
 
 ```bash
-pip install -r requirements.txt
-uvicorn main:api --reload --host 0.0.0.0 --port 5000
+docker compose down
+docker build -t mdencoder:latest .
+docker compose up -d
+docker compose logs -f atrac-api
 ```
 
-- The app will auto-reload on file changes (requires `watchfiles`)
-- API docs available at `http://localhost:5000/docs`
-- The startup event primes the Wine server with `wineserver -p`
+First build ~10-15 min (ffmpeg compile is the slow part). The container expects to join the external `proxy-network` Docker network (see docker-compose.yml).
 
-## Important Implementation Details
+## Important context
 
-### File Handling
+- **No psp_at3tool.exe.** Don't reintroduce it or Wine. The host kernel can't run wineserver. The git history has the Wine-based implementation if you ever need to look back.
+- **atracdenc CLI is extension-sensitive.** Output extension determines codec; `.aea` for ATRAC3. Don't pass bare UUID paths.
+- **The transcode pipeline strips video streams** (`-vn -map 0:a`). MP3s with embedded cover art used to confuse the downstream encoder.
+- **No automated tests.** Manual smoke test: encode a WAV, decode it back, transcode an MP3.
 
-- Input files are uploaded as `UploadFile` and copied to `NamedTemporaryFile` for processing
-- Output files are created in the system temp directory with UUID-based names
-- All temporary files are cleaned up via background tasks after the response is sent
-- File responses use `media_type='audio/wav'` regardless of actual ATRAC format (for browser compatibility)
+## Common tasks
 
-### Transcoding Pipeline
+### Adding a new ATRAC type
+Only meaningful if atracdenc gains support for it. Add to `atracTypes` enum and `encoder_args` dict in utils.py — the dict tuple is `(codec_name, bitrate_kbps_string)` matching atracdenc's `-e` and `--bitrate` flags.
 
-The `/transcode` endpoint applies FFmpeg filters *before* encoding:
-- Output always resampled to 44.1 kHz, stereo
-- If `loudnessTarget` is set: applies loudness normalization filter (`-loudnorm=I={target}`)
-- If `applyReplaygain` is True: applies replay gain volume filter
-- These are mutually exclusive options
+### Modifying the FFmpeg build
+Filters and codecs are enabled in the Dockerfile's `ffmpeg-builder` stage via the `FFMPEG_CONFIGURE_FLAGS` line. Anything not listed there is stripped.
 
-### CORS Configuration
-
-CORS middleware is added in the startup event (not at app initialization), with open settings: `allow_origins=["*"]`, `allow_methods=["*"]`, `allow_headers=["*"]`. This is intentional for public API usage.
-
-### Wine Integration
-
-- `psp_at3tool.exe` runs under Wine in 32-bit mode (`WINEARCH=win32`, `WINEPREFIX=/wine32`)
-- The `wineserver -p` call on startup initializes the Wine prefix
-- Subprocess calls use absolute paths: `/usr/bin/wine`, `/usr/bin/ffmpeg`, `/usr/bin/wineserver`
-
-## Testing & Verification
-
-No automated tests currently exist. Manual testing should verify:
-- Encoding: WAV → AT3 with each supported bitrate/type
-- Decoding: AT3 → WAV roundtrip
-- Transcoding: Various input formats, loudness targets (-20 to -5), replay gain option
-- File cleanup: Temp files are removed after requests complete
-- Error handling: Invalid file types, unsupported ATRAC types, subprocess failures
-
-## Common Workflows
-
-### Adding a New ATRAC Type
-
-1. Add enum value to `atracTypes` in utils.py (e.g., `PLUS384 = 'PLUS384'`)
-2. Add bitrate mapping to `bitrates` dict (e.g., `'PLUS384': 384`)
-3. The enum change automatically exposes the new type in FastAPI's OpenAPI schema
-
-### Modifying FFmpeg Filters
-
-Edit the Dockerfile builder stage's FFmpeg configure flags in the line:
-```dockerfile
-RUN echo "FFMPEG_CONFIGURE_FLAGS+=(--enable-encoder=pcm_s16le ...)" >> ffmpeg-build/common.sh
+### Debugging a failed encode
+Logs include the full `atracdenc` command line plus stdout/stderr. Reproduce manually with:
+```bash
+docker exec -it atrac-api atracdenc -e atrac3 --bitrate 132 -i /tmp/foo.wav -o /tmp/foo.aea
 ```
-
-Any new filters or encoders must be explicitly enabled here.
-
-### Debugging Subprocess Issues
-
-- Wine output is not captured (subprocess calls use default stdout/stderr)
-- FFmpeg output *is* captured and logged: `logger.info(transcoder.stdout.decode(...))`
-- Check container logs: `docker-compose logs -f mdencoder`
-- Errors from psp_at3tool.exe won't appear in logs; the process may fail silently
-
-## Dependencies
-
-See requirements.txt for all pinned versions. Key packages:
-- `fastapi`, `starlette`, `uvicorn`: Web framework
-- `pydantic`: Request/response validation
-- `python-multipart`: File upload parsing
-- `python-dotenv`: Environment variable loading (note: not used in the code currently)
-
-## Notes for Future Work
-
-- No environment configuration is used despite importing `python-dotenv`; consider using `.env` for LOG_LEVEL, port, host
-- The `/transcode` endpoint's filter logic could be refactored for clarity (conditionals building command list)
-- FFmpeg filter string formatting could be safer (use `-filter_complex` with quoted values)
-- Consider adding request validation for file extensions (see unused `allowed_file()` function)
