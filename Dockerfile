@@ -13,11 +13,11 @@ ENV WINEPREFIX="/wine32"
 ENV WINEARCH=win32
 ENV LOG_LEVEL=
 ENV DISPLAY=:99
-ENV WINE_CPU_TOPOLOGY="4:2"
+ENV WINE_CPU_TOPOLOGY="8:2"
 RUN dpkg --add-architecture i386
-RUN apt-get update && apt-get install -y wine32 wine:i386 cabextract zenity --no-install-recommends
+RUN apt-get update && apt-get install -y wine32 wine:i386 cabextract --no-install-recommends
 RUN apt-get clean
-RUN rm -rf /wine32 && mkdir -p /wine32 && WINEPREFIX=/wine32 WINEARCH=win32 /usr/bin/wine wineboot -u > /dev/null 2>&1 || true
+RUN mkdir -p /wine32 && WINEPREFIX=/wine32 WINEARCH=win32 /usr/bin/wine wineboot -u 2>&1 | grep -v "socket\|Function not implemented" || true
 COPY --from=builder /root/ffmpeg /usr/bin/ffmpeg
 COPY psp_at3tool.exe /root/psp_at3tool.exe
 COPY requirements.txt .

@@ -49,16 +49,26 @@ def do_encode(input, type, logger):
   env = os.environ.copy()
   env['WINEPREFIX'] = '/wine32'
   env['WINEARCH'] = 'win32'
-  env['WINESERVER_UNIX_SOCKET_DIR'] = '/tmp'
   result = subprocess.run(['/usr/bin/wine', '/root/psp_at3tool.exe', '-e', '-br', str(bitrates[type]),
     input,
     output], stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
-  if result.stdout:
-    logger.info(result.stdout.decode('utf-8', errors='ignore'))
-  if result.stderr:
-    logger.info(result.stderr.decode('utf-8', errors='ignore'))
+
+  stdout_text = result.stdout.decode('utf-8', errors='ignore') if result.stdout else ''
+  stderr_text = result.stderr.decode('utf-8', errors='ignore') if result.stderr else ''
+
+  if stdout_text and 'socket' not in stdout_text.lower():
+    logger.info(f"at3tool stdout: {stdout_text}")
+  if stderr_text and 'socket' not in stderr_text.lower():
+    logger.info(f"at3tool stderr: {stderr_text}")
+
   if result.returncode != 0:
+    logger.error(f"at3tool failed with code {result.returncode}")
+    logger.error(f"stdout: {stdout_text}")
+    logger.error(f"stderr: {stderr_text}")
     raise RuntimeError(f"Encoding failed with code {result.returncode}")
+
   if not Path(output).exists():
     raise RuntimeError(f"Encoding produced no output file: {output}")
+
+  logger.info(f"Encoding complete: {output}")
   return output

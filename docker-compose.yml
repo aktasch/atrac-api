@@ -8,10 +8,17 @@ services:
       - "5000:5000"
     environment:
       - LOG_LEVEL=
+      - WINEPREFIX=/wine32
+      - WINEARCH=win32
+      - DISPLAY=:99
     volumes:
       - /data/atrac-api/uploads:/uploads
+    cpus: '4'
+    mem_limit: 2g
     cap_add:
       - SYS_PTRACE
+      - NET_ADMIN
     security_opt:
       - "apparmor=unconfined"
+    ipc: host
     restart: unless-stopped
