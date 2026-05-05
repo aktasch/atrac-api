@@ -34,7 +34,7 @@ def encode_atrac(type: atracTypes, background_tasks: BackgroundTasks, file: Uplo
     input.flush()
     output = do_encode(input.name, type, logger)
   background_tasks.add_task(remove_file, output, logger)
-  return FileResponse(path=output, filename=Path(filename).stem + '.aea', media_type='audio/aea')
+  return FileResponse(path=output, filename=Path(filename).stem + '.at3', media_type='audio/x-at3')
 
 
 @api.post('/transcode')
@@ -78,7 +78,7 @@ def transcode_atrac(
   finally:
     background_tasks.add_task(remove_file, intermediary, logger)
   background_tasks.add_task(remove_file, output, logger)
-  return FileResponse(path=output, filename=Path(filename).stem + '.aea', media_type='audio/aea')
+  return FileResponse(path=output, filename=Path(filename).stem + '.at3', media_type='audio/x-at3')
 
 
 @api.post('/decode')

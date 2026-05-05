@@ -1,4 +1,4 @@
-import os, shutil, subprocess
+import os, shutil, struct, subprocess
 from enum import Enum
 from tempfile import gettempdir
 from pathlib import Path
@@ -21,6 +21,48 @@ encoder_args = {
   'LP4': ('atrac3', '64'),
 }
 
+# Per-type ATRAC3 frame parameters.
+# bytes_per_frame is the per-channel frame size; nBlockAlign in the WAV header
+# is bytes_per_frame * 2 (stereo). Web MiniDisc Pro reads nBlockAlign at offset 32
+# and divides by 2 to recover bytes_per_frame.
+type_params = {
+  'LP2': (132, 192),
+  'LP4': (66, 96),
+}
+
+# atracdenc emits OMA (Sony OpenMG Audio) with a fixed 96-byte header.
+# Web MiniDisc Pro expects a RIFF/WAVE wrapper with wFormatTag=0x0270 (ATRAC3)
+# instead. So we strip the OMA header and rewrap as RIFF/WAVE before returning.
+OMA_HEADER_SIZE = 96
+
+
+def wrap_atrac3_as_riff(frames: bytes, bitrate_kbps: int, bytes_per_frame: int) -> bytes:
+  """Wrap raw ATRAC3 frames in a Sony-style RIFF/WAVE/fmt /data container.
+
+  Layout matches what Web MiniDisc Pro's getATRACWAVEncoding() parses:
+    offset 20 wFormatTag      = 0x0270  (WAVE_FORMAT_SONY_SCX / ATRAC3)
+    offset 22 nChannels       = 2
+    offset 24 nSamplesPerSec  = 44100
+    offset 32 nBlockAlign     = bytes_per_frame * 2  (client divides by 2)
+  """
+  avg_bps = bitrate_kbps * 1000 // 8
+  fmt_chunk_body = struct.pack('<HHIIHHH',
+    0x0270,                # wFormatTag
+    2,                     # nChannels
+    44100,                 # nSamplesPerSec
+    avg_bps,               # nAvgBytesPerSec
+    bytes_per_frame * 2,   # nBlockAlign (stereo, client reads/2)
+    0,                     # wBitsPerSample
+    14,                    # cbSize  (extension follows)
+  )
+  # 14-byte Sony codec extension. WMD Pro discards these bytes; we just need the
+  # extension to exist so parsers that read cbSize don't trip.
+  fmt_chunk_body += struct.pack('<HHHHHHH', 1, 0x1000, 0, 0, 0, 0, 0)
+  fmt_chunk = b'fmt ' + struct.pack('<I', len(fmt_chunk_body)) + fmt_chunk_body
+  data_chunk = b'data' + struct.pack('<I', len(frames)) + frames
+  body = b'WAVE' + fmt_chunk + data_chunk
+  return b'RIFF' + struct.pack('<I', len(body)) + body
+
 
 def remove_file(filename, logger):
   try:
@@ -31,16 +73,17 @@ def remove_file(filename, logger):
 
 
 def do_encode(input, type, logger):
-  # atracdenc requires .wav input; output extension is .aea for ATRAC3
+  # atracdenc requires .wav input; intermediate output is .aea (OMA container)
   input_wav = Path(gettempdir(), f"{uuid4()}.wav").absolute()
-  output = Path(gettempdir(), f"{uuid4()}.aea").absolute()
+  oma_path = Path(gettempdir(), f"{uuid4()}.aea").absolute()
   shutil.copy(str(input), str(input_wav))
 
-  codec, bitrate = encoder_args[type if isinstance(type, str) else type.value]
+  type_str = type if isinstance(type, str) else type.value
+  codec, bitrate = encoder_args[type_str]
   cmd = ['/usr/bin/atracdenc', '-e', codec]
   if bitrate is not None:
     cmd += ['--bitrate', bitrate]
-  cmd += ['-i', str(input_wav), '-o', str(output)]
+  cmd += ['-i', str(input_wav), '-o', str(oma_path)]
   logger.info(f"Running: {' '.join(cmd)}")
 
   try:
@@ -63,10 +106,28 @@ def do_encode(input, type, logger):
 
   if result.returncode != 0:
     raise RuntimeError(f"Encoding failed with code {result.returncode}: {stderr_text or stdout_text}")
-  if not Path(output).exists():
-    raise RuntimeError(f"Encoding produced no output file: {output}")
+  if not oma_path.exists():
+    raise RuntimeError(f"Encoding produced no output file: {oma_path}")
 
-  logger.info(f"Encoding complete: {output}")
+  # Convert OMA -> RIFF/WAVE AT3 (the format Web MiniDisc Pro expects)
+  with open(oma_path, 'rb') as f:
+    f.seek(OMA_HEADER_SIZE)
+    frames = f.read()
+  try: os.remove(oma_path)
+  except OSError: pass
+
+  bitrate_kbps, bytes_per_frame = type_params[type_str]
+  if len(frames) % bytes_per_frame != 0:
+    raise RuntimeError(
+      f"OMA payload size {len(frames)} is not a multiple of frame size {bytes_per_frame} for {type_str}"
+    )
+  riff = wrap_atrac3_as_riff(frames, bitrate_kbps, bytes_per_frame)
+
+  output = Path(gettempdir(), f"{uuid4()}.at3").absolute()
+  with open(output, 'wb') as f:
+    f.write(riff)
+
+  logger.info(f"Encoding complete: {output} ({len(frames)//bytes_per_frame} frames, {len(riff)} bytes)")
   return output
 
 
