@@ -12,17 +12,20 @@ FROM python:3.11-slim
 ENV WINEPREFIX="/wine32"
 ENV WINEARCH=win32
 ENV LOG_LEVEL=
+ENV DISPLAY=:99
+ENV WINE_CPU_TOPOLOGY="4:2"
 RUN dpkg --add-architecture i386
-RUN apt-get update && apt-get install -y wine32 wine:i386 winbind --no-install-recommends
+RUN apt-get update && apt-get install -y wine32 wine:i386 cabextract zenity --no-install-recommends
 RUN apt-get clean
-RUN /usr/bin/wine wineboot -i | true
+RUN rm -rf /wine32 && mkdir -p /wine32 && WINEPREFIX=/wine32 WINEARCH=win32 /usr/bin/wine wineboot -u > /dev/null 2>&1 || true
 COPY --from=builder /root/ffmpeg /usr/bin/ffmpeg
 COPY psp_at3tool.exe /root/psp_at3tool.exe
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 RUN mkdir /uploads
 COPY *.py ./
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
 EXPOSE 5000
-ENTRYPOINT ["uvicorn"]
-CMD ["main:api", "--host", "0.0.0.0", "--port", "5000"]
+ENTRYPOINT ["/entrypoint.sh"]

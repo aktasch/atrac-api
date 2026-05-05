@@ -1,11 +1,17 @@
+version: '3.8'
+
 services:
-  mdencoder:
+  atrac-api:
     image: mdencoder:latest
-    container_name: mdEncoder
+    container_name: atrac-api
     ports:
       - "5000:5000"
     environment:
       - LOG_LEVEL=
     volumes:
       - /data/atrac-api/uploads:/uploads
+    cap_add:
+      - SYS_PTRACE
+    security_opt:
+      - "apparmor=unconfined"
     restart: unless-stopped

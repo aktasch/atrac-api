@@ -46,11 +46,17 @@ def remove_file(filename, logger):
 
 def do_encode(input, type, logger):
   output = Path(gettempdir(), str(uuid4())).absolute()
+  env = os.environ.copy()
+  env['WINEPREFIX'] = '/wine32'
+  env['WINEARCH'] = 'win32'
+  env['WINESERVER_UNIX_SOCKET_DIR'] = '/tmp'
   result = subprocess.run(['/usr/bin/wine', '/root/psp_at3tool.exe', '-e', '-br', str(bitrates[type]),
     input,
-    output], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    output], stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
   if result.stdout:
     logger.info(result.stdout.decode('utf-8', errors='ignore'))
+  if result.stderr:
+    logger.info(result.stderr.decode('utf-8', errors='ignore'))
   if result.returncode != 0:
     raise RuntimeError(f"Encoding failed with code {result.returncode}")
   if not Path(output).exists():
