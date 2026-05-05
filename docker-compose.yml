@@ -4,8 +4,6 @@ services:
   atrac-api:
     image: mdencoder:latest
     container_name: atrac-api
-    ports:
-      - "5000:5000"
     environment:
       - LOG_LEVEL=
       - WINEPREFIX=/wine32
@@ -22,3 +20,9 @@ services:
       - "apparmor=unconfined"
     ipc: host
     restart: unless-stopped
+    networks:
+      - proxy-network
+
+networks:
+  proxy-network:
+    external: true
