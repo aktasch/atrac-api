@@ -45,14 +45,30 @@ def remove_file(filename, logger):
 
 
 def do_encode(input, type, logger):
-  output = Path(gettempdir(), str(uuid4())).absolute()
+  # psp_at3tool.exe requires .wav input and .at3 output extensions
+  input_wav = Path(gettempdir(), f"{uuid4()}.wav").absolute()
+  output = Path(gettempdir(), f"{uuid4()}.at3").absolute()
+  shutil.copy(str(input), str(input_wav))
+
   env = os.environ.copy()
   env['WINEPREFIX'] = '/wine32'
   env['WINEARCH'] = 'win32'
   env['WINEDEBUG'] = '-all'
-  result = subprocess.run(['/usr/bin/wine', '/root/psp_at3tool.exe', '-e', '-br', str(bitrates[type]),
-    str(input),
-    str(output)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+
+  cmd = ['/usr/bin/wine', '/root/psp_at3tool.exe', '-e', '-br', str(bitrates[type]),
+    str(input_wav), str(output)]
+  logger.info(f"Running: {' '.join(cmd)}")
+
+  try:
+    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+      stdin=subprocess.DEVNULL, env=env, timeout=120)
+  except subprocess.TimeoutExpired as e:
+    logger.error("at3tool timed out after 120s — likely hung waiting on something")
+    subprocess.run(['pkill', '-9', '-f', 'psp_at3tool'], check=False)
+    subprocess.run(['pkill', '-9', 'wineserver'], check=False)
+    try: os.remove(input_wav)
+    except OSError: pass
+    raise RuntimeError("Encoding timed out") from e
 
   stdout_text = result.stdout.decode('utf-8', errors='ignore') if result.stdout else ''
   stderr_text = result.stderr.decode('utf-8', errors='ignore') if result.stderr else ''
@@ -62,13 +78,14 @@ def do_encode(input, type, logger):
   if stderr_text:
     logger.info(f"at3tool stderr: {stderr_text}")
 
+  try: os.remove(input_wav)
+  except OSError: pass
+
   if result.returncode != 0:
     logger.error(f"at3tool failed with code {result.returncode} for type {type}")
-    logger.error(f"command: wine /root/psp_at3tool.exe -e -br {bitrates[type]} {input} {output}")
     raise RuntimeError(f"Encoding failed with code {result.returncode}: {stderr_text or stdout_text}")
 
   if not Path(output).exists():
-    logger.error(f"No output file created at {output}")
     raise RuntimeError(f"Encoding produced no output file: {output}")
 
   logger.info(f"Encoding complete: {output}")
