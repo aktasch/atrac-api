@@ -35,6 +35,7 @@ def encode_atrac(type: atracTypes, background_tasks: BackgroundTasks, file: Uplo
   logger.info(f"Beginning encode for {filename}")
   with NamedTemporaryFile() as input:
     shutil.copyfileobj(file.file, input)
+    input.flush()
     output = do_encode(input.name, type, logger)
   background_tasks.add_task(remove_file, output, logger)
   return FileResponse(path=output, filename=Path(filename).stem + '.at3', media_type='audio/wav')
@@ -47,8 +48,8 @@ def transcode_atrac(type: atracTypes, background_tasks: BackgroundTasks, applyRe
 
   transcoderCommands = []
   if loudnessTarget is not None:
-    transcoderCommands.append(f'-filter_complex')
-    transcoderCommands.append(f'-loudnorm=I={loudnessTarget}')
+    transcoderCommands.append('-filter_complex')
+    transcoderCommands.append(f'loudnorm=I={loudnessTarget}')
   elif applyReplaygain:
     transcoderCommands.append('-af')
     transcoderCommands.append('volume=replaygain=track')
@@ -57,6 +58,7 @@ def transcode_atrac(type: atracTypes, background_tasks: BackgroundTasks, applyRe
   intermediary = Path(gettempdir(), str(uuid4())).absolute()
   with NamedTemporaryFile() as input:
     shutil.copyfileobj(file.file, input)
+    input.flush()
     logger.info("Starting ffmpeg...")
     transcoder = subprocess.run([
       '/usr/bin/ffmpeg', '-i',
@@ -64,7 +66,11 @@ def transcode_atrac(type: atracTypes, background_tasks: BackgroundTasks, applyRe
       *transcoderCommands,
       intermediary], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     logger.info(transcoder.stdout.decode('utf-8', errors='ignore'))
-  
+    if transcoder.returncode != 0:
+      raise HTTPException(status_code=500, detail="FFmpeg transcoding failed")
+    if not Path(intermediary).exists():
+      raise HTTPException(status_code=500, detail="FFmpeg produced no output file")
+
   logger.info("Starting at3tool...")
   output = do_encode(intermediary, type, logger)
   background_tasks.add_task(remove_file, output, logger)
@@ -79,8 +85,13 @@ def decode_atrac(background_tasks: BackgroundTasks, file: UploadFile = File()):
   output = Path(gettempdir(), str(uuid4())).absolute()
   with NamedTemporaryFile() as input:
     shutil.copyfileobj(file.file, input)
-    encoder = subprocess.run(['/usr/bin/wine', 'psp_at3tool.exe', '-d', 
-      Path(input.name), 
+    input.flush()
+    result = subprocess.run(['/usr/bin/wine', '/root/psp_at3tool.exe', '-d',
+      Path(input.name),
       output])
-    background_tasks.add_task(remove_file, output, logger)
-    return FileResponse(path=output, filename=Path(filename).stem + '.wav', media_type='audio/wav')
+    if result.returncode != 0:
+      raise HTTPException(status_code=500, detail="Decoding failed")
+    if not Path(output).exists():
+      raise HTTPException(status_code=500, detail="Decoding produced no output file")
+  background_tasks.add_task(remove_file, output, logger)
+  return FileResponse(path=output, filename=Path(filename).stem + '.wav', media_type='audio/wav')

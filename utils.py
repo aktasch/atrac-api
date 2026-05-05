@@ -46,7 +46,11 @@ def remove_file(filename, logger):
 
 def do_encode(input, type, logger):
   output = Path(gettempdir(), str(uuid4())).absolute()
-  subprocess.run(['/usr/bin/wine', 'psp_at3tool.exe', '-e', '-br', str(bitrates[type]), 
-    input, 
+  result = subprocess.run(['/usr/bin/wine', '/root/psp_at3tool.exe', '-e', '-br', str(bitrates[type]),
+    input,
     output])
+  if result.returncode != 0:
+    raise RuntimeError(f"Encoding failed with code {result.returncode}")
+  if not Path(output).exists():
+    raise RuntimeError(f"Encoding produced no output file: {output}")
   return output

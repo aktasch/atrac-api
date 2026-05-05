@@ -1,0 +1,11 @@
+services:
+  mdencoder:
+    image: mdencoder:latest
+    container_name: mdEncoder
+    ports:
+      - "5000:5000"
+    environment:
+      - LOG_LEVEL=
+    volumes:
+      - /data/atrac-api/uploads:/uploads
+    restart: unless-stopped

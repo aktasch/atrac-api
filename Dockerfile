@@ -1,7 +1,7 @@
 FROM python:3.11-slim AS builder
 WORKDIR /root
 ENV ARCH=x86_64
-RUN apt-get update && apt-get install -y yasm git curl lbzip2 build-essential
+RUN apt-get update && apt-get install -y yasm nasm git curl lbzip2 build-essential
 RUN git clone https://github.com/acoustid/ffmpeg-build.git
 RUN echo "FFMPEG_CONFIGURE_FLAGS+=(--enable-encoder=pcm_s16le --enable-muxer=wav --enable-filter=loudnorm --enable-filter=aresample --enable-filter=replaygain --enable-filter=volume)" >> ffmpeg-build/common.sh
 RUN ffmpeg-build/build-linux.sh
