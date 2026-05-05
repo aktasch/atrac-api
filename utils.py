@@ -51,17 +51,21 @@ def do_encode(input, type, logger):
   env['WINEARCH'] = 'win32'
   env['WINEDEBUG'] = '-all'
   result = subprocess.run(['/usr/bin/wine', '/root/psp_at3tool.exe', '-e', '-br', str(bitrates[type]),
-    input,
-    output], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=env)
+    str(input),
+    str(output)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
 
   stdout_text = result.stdout.decode('utf-8', errors='ignore') if result.stdout else ''
+  stderr_text = result.stderr.decode('utf-8', errors='ignore') if result.stderr else ''
 
   if stdout_text:
-    logger.info(f"at3tool: {stdout_text}")
+    logger.info(f"at3tool stdout: {stdout_text}")
+  if stderr_text:
+    logger.info(f"at3tool stderr: {stderr_text}")
 
   if result.returncode != 0:
     logger.error(f"at3tool failed with code {result.returncode} for type {type}")
-    raise RuntimeError(f"Encoding failed with code {result.returncode}")
+    logger.error(f"command: wine /root/psp_at3tool.exe -e -br {bitrates[type]} {input} {output}")
+    raise RuntimeError(f"Encoding failed with code {result.returncode}: {stderr_text or stdout_text}")
 
   if not Path(output).exists():
     logger.error(f"No output file created at {output}")
